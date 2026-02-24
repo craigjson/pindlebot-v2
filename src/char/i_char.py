@@ -17,6 +17,16 @@ from screen import grab, convert_monitor_to_screen, convert_screen_to_abs, conve
 import template_finder
 from ui_manager import detect_screen_object, ScreenObjects, get_closest_non_hud_pixel
 
+_MOUSE_BUTTON_MAP = {"mouse1": "left", "mouse2": "right", "mouse3": "middle", "mouse4": "x", "mouse5": "x2"}
+
+def _send_force_move():
+    """Send force_move key, handling mouse button bindings (e.g. mouse3)."""
+    fm = Config().char["force_move"].lower()
+    if fm in _MOUSE_BUTTON_MAP:
+        mouse.click(_MOUSE_BUTTON_MAP[fm])
+    else:
+        keyboard.send(fm)
+
 class IChar:
     _CrossGameCapabilities: None | CharacterCapabilities = None
 
@@ -205,7 +215,7 @@ class IChar:
             mouse.move(x, y, randomize=5, delay_factor=[factor*0.1, factor*0.14])
             wait(0.012, 0.02)
             if force_move:
-                keyboard.send(Config().char["force_move"])
+                _send_force_move()
             else:
                 mouse.click(button="left")
 
@@ -223,7 +233,7 @@ class IChar:
         mouse.move(x, y, randomize=5, delay_factor=[factor*0.1, factor*0.14])
         wait(0.012, 0.02)
         if force_move:
-            keyboard.send(Config().char["force_move"])
+            _send_force_move()
         else:
             mouse.click(button="left")
 

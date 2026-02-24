@@ -8,6 +8,14 @@ from logger import Logger
 config_lock = threading.Lock()
 from utils.misc import wait, only_lowercase_letters
 
+# Supported resolution presets: name -> (width, height, scale_from_720p)
+RESOLUTION_PRESETS = {
+    "720p":  (1280, 720, 1.0),
+    "1080p": (1920, 1080, 1.5),
+    "1440p": (2560, 1440, 2.0),
+    "4k":    (3840, 2160, 3.0),
+}
+
 def _default_iff(value, iff, default = None):
     return default if value == iff else value
 
@@ -143,7 +151,16 @@ class Config:
             "pickit_screenshots": bool(int(self._select_val("general", "pickit_screenshots"))),
             "d2r_path": _default_iff(self._select_val("general", "d2r_path"), "", "C:\Program Files (x86)\Diablo II Resurrected"),
             "restart_d2r_when_stuck": bool(int(self._select_val("general", "restart_d2r_when_stuck"))),
+            "resolution": self._select_optional("general", "resolution", "720p"),
         }
+
+        # Determine resolution scale factor
+        res_name = self.general["resolution"].lower().strip()
+        if res_name in RESOLUTION_PRESETS:
+            self._res_width, self._res_height, self._res_scale = RESOLUTION_PRESETS[res_name]
+        else:
+            Logger.warning(f"Unknown resolution '{res_name}', defaulting to 720p")
+            self._res_width, self._res_height, self._res_scale = RESOLUTION_PRESETS["720p"]
 
         self.routes = {}
         order_str = self._select_val("routes", "order")
@@ -330,6 +347,10 @@ class Config:
         for key in self.configs["game"]["parser"]["path"]:
             self.path[key] = np.reshape(np.array([int(x) for x in self._select_val("path", key).split(",")]), (-1, 2))
 
+        # Apply resolution scaling if not 720p (game.ini values are authored at 1280x720)
+        if self._res_scale != 1.0:
+            self._apply_resolution_scaling()
+
         self.shop = {
             "shop_trap_claws": bool(int(self._select_val("claws", "shop_trap_claws"))),
             "shop_melee_claws": bool(int(self._select_val("claws", "shop_melee_claws"))),
@@ -348,6 +369,33 @@ class Config:
             "transmute_every_x_game": self._select_val("transmute","transmute_every_x_game"),
             "transmute": [x.strip() for x in transmute_str.split(",")],
         }
+
+    def _apply_resolution_scaling(self):
+        """Scale all ui_pos, ui_roi, and path values from 720p to the target resolution."""
+        s = self._res_scale
+        Logger.info(f"Scaling UI coordinates from 720p to {self.general['resolution']} (factor: {s}x)")
+
+        # Scale ui_pos (all integer pixel positions)
+        # Override screen dimensions with actual target values
+        self.ui_pos["screen_width"] = self._res_width
+        self.ui_pos["screen_height"] = self._res_height
+        self.ui_pos["center_x"] = self._res_width // 2
+        self.ui_pos["center_y"] = self._res_height // 2
+
+        # Scale all other ui_pos values
+        skip_pos_keys = {"screen_width", "screen_height", "center_x", "center_y"}
+        for key in self.ui_pos:
+            if key not in skip_pos_keys:
+                self.ui_pos[key] = int(self.ui_pos[key] * s)
+
+        # Scale ui_roi (all [left, top, width, height] arrays)
+        for key in self.ui_roi:
+            self.ui_roi[key] = (self.ui_roi[key] * s).astype(int)
+
+        # Scale path waypoints
+        for key in self.path:
+            self.path[key] = (self.path[key] * s).astype(int)
+
 
 if __name__ == "__main__":
     from copy import deepcopy

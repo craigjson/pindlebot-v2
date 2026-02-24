@@ -1,7 +1,6 @@
 from collections import defaultdict
 from functools import reduce
 import itertools
-from pipes import Template
 from typing_extensions import Self
 
 from config import Config

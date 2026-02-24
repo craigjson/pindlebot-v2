@@ -157,7 +157,11 @@ def should_pickup(item_data) -> tuple[bool, str]:
                 if ignore:
                     continue
 
-            property_condition = eval(pick_eval_expr) # * This string in the eval uses the item_data that is being passed in
+            try:
+                property_condition = eval(pick_eval_expr) # * This string in the eval uses the item_data that is being passed in
+            except Exception as e:
+                Logger.warning(f"BNIP eval error: {e} | expr: {expression.raw}")
+                continue
             if property_condition:
                 return True, expression.raw
 

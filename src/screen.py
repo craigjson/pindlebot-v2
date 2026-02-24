@@ -6,8 +6,15 @@ from config import Config
 import threading
 import time
 
-sct = mss()
-monitor_roi = sct.monitors[0]
+_sct_main = mss()
+monitor_roi = _sct_main.monitors[0]
+_sct_local = threading.local()
+
+def _get_sct():
+    """Get a thread-local mss instance (Windows device contexts are per-thread)."""
+    if not hasattr(_sct_local, 'instance'):
+        _sct_local.instance = mss()
+    return _sct_local.instance
 found_offsets = False
 monitor_x_range = None
 monitor_y_range = None
@@ -78,7 +85,7 @@ def grab(force_new: bool = False) -> np.ndarray:
     else:
         with cached_img_lock:
             last_grab = time.perf_counter()
-        img = np.array(sct.grab(monitor_roi))
+        img = np.array(_get_sct().grab(monitor_roi))
         with cached_img_lock:
             cached_img = img[:, :, :3]
         return cached_img

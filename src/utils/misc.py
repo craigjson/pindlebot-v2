@@ -22,7 +22,8 @@ from win32process import GetWindowThreadProcessId
 import psutil
 
 from rapidfuzz.process import extractOne
-from rapidfuzz.string_metric import levenshtein
+from rapidfuzz.distance import Levenshtein
+levenshtein = Levenshtein.distance
 
 def close_down_d2():
     subprocess.call(["taskkill","/F","/IM","D2R.exe"], stderr=subprocess.DEVNULL)

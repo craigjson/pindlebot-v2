@@ -13,6 +13,10 @@ from game_controller import GameController
 from utils.graphic_debugger import GraphicDebuggerController
 from utils.misc import restore_d2r_window_visibility
 from utils.auto_settings import adjust_settings, backup_settings, restore_settings_from_backup
+from utils.arduino_hid import ArduinoHID
+from utils.arduino_keyboard import install_arduino_keyboard
+from utils.humanizer import Humanizer
+from utils import custom_mouse
 
 @dataclass
 class Controllers():
@@ -40,8 +44,10 @@ def start_or_stop_graphic_debugger(controllers: Controllers):
         controllers.game.stop()
         controllers.debugger.start()
 
-def on_exit():
+def on_exit(arduino_ref=None):
     Logger.info(f'Force Exit')
+    if arduino_ref and arduino_ref.connected:
+        arduino_ref.disconnect()
     screen.stop_detecting_window()
     restore_d2r_window_visibility()
     os._exit(1)
@@ -76,6 +82,22 @@ def main():
         print(f"ERROR: Unkown logg_lvl {Config().advanced_options['logg_lvl']}. Must be one of [info, debug]")
     startup_checks()
 
+    # Initialize Arduino HID (auto-detect or skip if not connected)
+    arduino = ArduinoHID()
+    humanizer = Humanizer()
+    arduino_port = ArduinoHID.find_arduino_port()
+    if arduino_port:
+        arduino.port = arduino_port
+        if arduino.connect():
+            install_arduino_keyboard(arduino)
+            custom_mouse.initialize_arduino(arduino_hid=arduino, humanizer=humanizer)
+        else:
+            Logger.warning("Arduino found but connection failed, using software input")
+            custom_mouse.initialize_arduino(humanizer=humanizer)
+    else:
+        Logger.info("No Arduino detected, using software input (pydirectinput/mouse)")
+        custom_mouse.initialize_arduino(humanizer=humanizer)
+
     print(f"============ Botty {__version__} [name: {Config().general['name']}] ============")
     print("\nFor gettings started and documentation\nplease read https://github.com/aeon0/botty\n")
     table = BeautifulTable()
@@ -95,7 +117,7 @@ def main():
     keyboard.add_hotkey(Config().advanced_options['restore_settings_from_backup_key'], lambda: restore_settings_from_backup())
     keyboard.add_hotkey(Config().advanced_options['settings_backup_key'], lambda: backup_settings())
     keyboard.add_hotkey(Config().advanced_options['resume_key'], lambda: start_or_pause_bot(controllers))
-    keyboard.add_hotkey(Config().advanced_options["exit_key"], lambda: on_exit())
+    keyboard.add_hotkey(Config().advanced_options["exit_key"], lambda: on_exit(arduino))
     keyboard.wait()
 
 

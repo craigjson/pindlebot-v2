@@ -1,4 +1,24 @@
-from tesserocr import PyTessBaseAPI, OEM
+import os
+try:
+    from tesserocr import PyTessBaseAPI, OEM
+    _has_tesserocr = True
+except ImportError:
+    _has_tesserocr = False
+try:
+    import pytesseract
+    # Auto-detect Tesseract install path on Windows
+    _tesseract_paths = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+    ]
+    for _tp in _tesseract_paths:
+        if os.path.exists(_tp):
+            pytesseract.pytesseract.tesseract_cmd = _tp
+            break
+    _has_pytesseract = True
+except ImportError:
+    _has_pytesseract = False
 import numpy as np
 import cv2
 from utils.misc import erode_to_black, find_best_match
@@ -44,6 +64,14 @@ def image_to_text(
     if type(images) == np.ndarray:
         images = [images]
     results = []
+
+    if not _has_tesserocr and not _has_pytesseract:
+        Logger.warning("No OCR backend available (install tesserocr or pytesseract)")
+        return [OcrResult(original_text="", text="", word_confidences=[], mean_confidence=0) for _ in images]
+
+    if not _has_tesserocr and _has_pytesseract:
+        return _image_to_text_pytesseract(images, model, psm, scale, crop_pad, erode, invert, threshold,
+                                           digits_only, fix_regexps, check_known_errors, correct_words)
 
     with PyTessBaseAPI(psm=psm, oem=OEM.LSTM_ONLY, path=f"assets/tessdata", lang=model ) as api:
         api.ReadConfigFile("assets/tessdata/ocr_config.txt")
@@ -300,3 +328,64 @@ def _ocr_result_dictionary_check(
         if line_cnt < (len(words_by_lines) - 1):
             new_text += "\n"
     return new_text
+
+
+def _image_to_text_pytesseract(images, model, psm, scale, crop_pad, erode, invert, threshold,
+                                digits_only, fix_regexps, check_known_errors, correct_words):
+    """Fallback OCR using pytesseract when tesserocr is not available."""
+    tessdata_dir = os.path.normpath(os.path.abspath("assets/tessdata"))
+    # Set TESSDATA_PREFIX env var — more reliable than --tessdata-dir on Windows
+    os.environ["TESSDATA_PREFIX"] = tessdata_dir
+    results = []
+    for image in images:
+        processed_img = image
+        if scale:
+            processed_img = cv2.resize(processed_img, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+        if erode:
+            processed_img = erode_to_black(processed_img)
+        if crop_pad:
+            processed_img = _crop_pad(processed_img)
+        image_is_binary = (image.shape[2] if len(image.shape) == 3 else 1) == 1 and image.dtype == bool
+        if not image_is_binary and threshold:
+            processed_img = cv2.cvtColor(processed_img, cv2.COLOR_BGR2GRAY)
+            processed_img = cv2.threshold(processed_img, threshold, 255, cv2.THRESH_BINARY)[1]
+        if invert:
+            if threshold or image_is_binary:
+                processed_img = cv2.bitwise_not(processed_img)
+            else:
+                processed_img = ~processed_img
+
+        config = f"--psm {psm} --oem 1"
+        if digits_only:
+            config += " -c tessedit_char_whitelist=0123456789"
+
+        try:
+            original_text = pytesseract.image_to_string(processed_img, lang=model, config=config)
+        except Exception as e:
+            Logger.warning(f"pytesseract OCR failed: {e}")
+            original_text = ""
+
+        text = original_text
+        if psm in (7, 8, 13):
+            text = text.replace('\n', '')
+        word_confidences = []
+        try:
+            data = pytesseract.image_to_data(processed_img, lang=model, config=config, output_type=pytesseract.Output.DICT)
+            word_confidences = [int(c) for c in data.get('conf', []) if str(c).lstrip('-').isdigit() and int(c) > 0]
+        except Exception:
+            pass
+
+        if fix_regexps:
+            text = _fix_regexps(text)
+        if check_known_errors:
+            text = _check_known_errors(text)
+        if correct_words:
+            text = _ocr_result_dictionary_check(text, word_confidences if word_confidences else [50])
+        mean_conf = sum(word_confidences) / max(len(word_confidences), 1) if word_confidences else 0
+        results.append(OcrResult(
+            original_text=original_text,
+            text=text,
+            word_confidences=word_confidences,
+            mean_confidence=mean_conf
+        ))
+    return results

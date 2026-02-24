@@ -4,10 +4,20 @@ from logger import Logger
 import cv2
 import datetime
 import traceback
-import discord
 from version import __version__
 import numpy as np
-from discord import Webhook, RequestsWebhookAdapter, Color, InvalidArgument
+try:
+    from discord import Webhook, Color, InvalidArgument
+    # RequestsWebhookAdapter removed in discord.py 2.0+
+    try:
+        from discord import RequestsWebhookAdapter
+    except ImportError:
+        RequestsWebhookAdapter = None
+except ImportError:
+    Webhook = None
+    Color = None
+    InvalidArgument = Exception
+    RequestsWebhookAdapter = None
 import json
 class DiscordEmbeds(GenericApi):
     def __init__(self):

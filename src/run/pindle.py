@@ -52,6 +52,6 @@ class Pindle:
             if not self._pather.traverse_nodes((Location.A5_PINDLE_START, Location.A5_PINDLE_SAFE_DIST), self._char):
                 return False
         self._char.kill_pindle()
-        wait(0.2, 0.3)
+        wait(1.5, 2.0)
         picked_up_items = self._pickit.pick_up_items(self._char)
         return (Location.A5_PINDLE_END, picked_up_items)

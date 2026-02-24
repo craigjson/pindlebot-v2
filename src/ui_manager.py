@@ -336,6 +336,13 @@ def center_mouse(delay_factor: list = None):
 @cache
 def get_hud_mask() -> np.ndarray:
     mask = cv2.imread(f"assets/hud_mask.png", cv2.IMREAD_GRAYSCALE)
+    # Scale HUD mask to match current resolution
+    res_scale = Config()._res_scale
+    if res_scale != 1.0 and mask is not None:
+        h, w = mask.shape[:2]
+        new_w = max(1, int(w * res_scale))
+        new_h = max(1, int(h * res_scale))
+        mask = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
     return cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)[1]
 
 def _find_nearest_nonzero(img: np.ndarray, pos: tuple[int, int]) -> tuple[int, int]:

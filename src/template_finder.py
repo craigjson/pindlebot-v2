@@ -40,10 +40,25 @@ TEMPLATE_PATHS = [
     "assets\\gamble",
 ]
 
+def _scale_template(img: np.ndarray, scale: float) -> np.ndarray:
+    """Scale a template image (BGRA) by the given factor.
+    Uses INTER_AREA for downscaling, INTER_CUBIC for upscaling.
+    Preserves alpha channel for mask generation."""
+    if scale == 1.0 or img is None:
+        return img
+    h, w = img.shape[:2]
+    new_w = max(1, int(w * scale))
+    new_h = max(1, int(h * scale))
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+    return cv2.resize(img, (new_w, new_h), interpolation=interp)
+
 @cache
 def stored_templates() -> dict[Template]:
     paths = []
     templates = {}
+    res_scale = Config()._res_scale
+    if res_scale != 1.0:
+        Logger.info(f"Auto-scaling templates by {res_scale}x for {Config().general['resolution']} resolution")
     for path in TEMPLATE_PATHS:
         paths += list_files_in_folder(path)
     for file_path in paths:
@@ -51,6 +66,8 @@ def stored_templates() -> dict[Template]:
         if file_name.lower().endswith('.png'):
             key = file_name[:-4].upper()
             template_img = load_template(file_path)
+            if res_scale != 1.0:
+                template_img = _scale_template(template_img, res_scale)
             templates[key] = Template(
                 name = key,
                 img_bgra = template_img,
@@ -74,10 +91,14 @@ def _process_template_refs(ref: str | np.ndarray | list[str]) -> list[Template]:
             templates.append(stored_templates()[i.upper()])
         # if the reference is an image, append new Template class object
         elif type(i) == np.ndarray:
+            img = i
+            res_scale = Config()._res_scale
+            if res_scale != 1.0:
+                img = _scale_template(img, res_scale)
             templates.append(Template(
-                img_bgr = i,
-                img_gray = cv2.cvtColor(i, cv2.COLOR_BGR2GRAY),
-                alpha_mask = alpha_to_mask(i)
+                img_bgr = img if img.shape[2] == 3 else cv2.cvtColor(img, cv2.COLOR_BGRA2BGR),
+                img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.shape[2] == 3 else cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY),
+                alpha_mask = alpha_to_mask(img)
             ))
     return templates
 

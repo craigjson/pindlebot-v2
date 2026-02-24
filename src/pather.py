@@ -348,6 +348,16 @@ class Pather:
             910: {"NECRO_TRAV_22": (287, 133), "NECRO_TRAV_21": (486, 269), },
             911: {"NECRO_TRAV_22": (13, 171), "NECRO_TRAV_21": (212, 307), },
         }
+        # Scale node offsets if running at a resolution other than 720p
+        if Config()._res_scale != 1.0:
+            s = Config()._res_scale
+            scaled_nodes = {}
+            for node_id, templates in self._nodes.items():
+                scaled_nodes[node_id] = {
+                    tpl: (int(x * s), int(y * s))
+                    for tpl, (x, y) in templates.items()
+                }
+            self._nodes = scaled_nodes
         self._paths = {
 	        # A5 Town
             (Location.A5_TOWN_START, Location.A5_NIHLATHAK_PORTAL): [3, 4, 5, 6, 8, 9],
