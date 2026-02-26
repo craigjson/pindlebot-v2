@@ -6,6 +6,7 @@ from pather import Pather, Location
 import template_finder
 from utils.misc import wait
 from ui_manager import ScreenObjects, is_visible
+from logger import Logger
 
 class A2(IAct):
     def __init__(self, pather: Pather, char: IChar):
@@ -46,11 +47,16 @@ class A2(IAct):
         return False
 
     def open_trade_menu(self, curr_loc: Location) -> Location | bool:
+        Logger.debug(f"A2.open_trade_menu: starting from {curr_loc}")
         if curr_loc != Location.A2_FARA_STASH:
+            Logger.debug("A2.open_trade_menu: navigating to fara_stash first")
             if not self._pather.traverse_nodes((curr_loc, Location.A2_FARA_STASH), self._char, force_move=True):
+                Logger.warning("A2.open_trade_menu: failed to reach fara_stash")
                 return False
             curr_loc = Location.A2_FARA_STASH
+        Logger.debug("A2.open_trade_menu: navigating fara_stash -> drognan")
         if not self._pather.traverse_nodes((curr_loc, Location.A2_DROGNAN), self._char, force_move=True):
+            Logger.warning("A2.open_trade_menu: failed to reach drognan")
             return False
         if open_npc_menu(Npc.DROGNAN):
             press_npc_btn(Npc.DROGNAN, "trade")
@@ -65,11 +71,16 @@ class A2(IAct):
         return False
 
     def open_wp(self, curr_loc: Location) -> bool:
+        Logger.debug(f"A2.open_wp: starting from {curr_loc}")
         if curr_loc != Location.A2_FARA_STASH:
+            Logger.debug("A2.open_wp: navigating to fara_stash first")
             if not self._pather.traverse_nodes((curr_loc, Location.A2_FARA_STASH), self._char, force_move=True):
+                Logger.warning("A2.open_wp: failed to reach fara_stash")
                 return False
             curr_loc = Location.A2_FARA_STASH
+        Logger.debug("A2.open_wp: navigating fara_stash -> wp")
         if not self._pather.traverse_nodes((curr_loc, Location.A2_WP), self._char, force_move=True):
+            Logger.warning("A2.open_wp: failed to reach wp from fara_stash")
             return False
         wait(0.5, 0.7)
         found_wp_func = lambda: is_visible(ScreenObjects.WaypointLabel)
