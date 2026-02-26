@@ -40,6 +40,7 @@ from run import Pindle, ShenkEld, Trav, Nihlathak, Arcane, Diablo
 from town import TownManager, A1, A2, A3, A4, A5, town_manager
 
 from messages import Messenger
+from utils.run_timer import RunTimer
 
 class Bot:
 
@@ -301,6 +302,8 @@ class Bot:
             need_inspect |= (self._game_stats._run_counter - 1) % Config().char["runs_per_stash"] == 0
         if need_inspect:
             img = personal.open()
+            # Refill belt from inventory potions (e.g. stockpiled rejuvs) and update rejuv stockpile need
+            belt.refill_belt_and_update_rejuv_stockpile(img)
             # Update TP, ID, key needs
             if self._game_stats._game_counter == 1:
                 self._use_id_tome = common.tome_state(img, 'id')[0] is not None
@@ -469,6 +472,7 @@ class Bot:
     # All the runs go here
     # ==================================
     def _ending_run_helper(self, res: bool | tuple[Location, bool]):
+        RunTimer.get().end_run()
         self._game_stats._run_counter += 1
         self._game_stats.log_exp()
         # either fill member variables with result data or mark run as failed
@@ -476,10 +480,16 @@ class Bot:
         if res:
             failed_run = False
             self._curr_loc, self._picked_up_items = res
-        # in case its the last run or the run was failed, end game, otherwise move to next run
-        if self.is_last_run() or failed_run:
-            if failed_run:
-                self._previous_run_failed = True
+        if failed_run:
+            self._previous_run_failed = True
+            # Try to TP to town and continue to next run instead of ending the game
+            if not self.is_last_run():
+                Logger.info("Run failed, attempting to TP to town and continue")
+                self.trigger_or_stop("end_run")
+                return
+            # Last run failed — try TP to town then end game normally
+            Logger.info("Last run failed, attempting to TP to town and end game")
+        if self.is_last_run():
             self.trigger_or_stop("end_game", failed=failed_run)
         else:
             self.trigger_or_stop("end_run")
@@ -488,6 +498,7 @@ class Bot:
         res = False
         self._do_runs["run_pindle"] = False
         self._game_stats.update_location("Pin")
+        RunTimer.get().start_run()
         self._curr_loc = self._pindle.approach(self._curr_loc)
         if self._curr_loc:
             set_pause_state(False)

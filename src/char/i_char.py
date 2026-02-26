@@ -251,32 +251,36 @@ class IChar:
         ]
         pos_away = convert_abs_to_monitor((-167, -30))
         wait(0.8, 1.3) # takes quite a while for tp to be visible
-        start = time.time()
-        retry_count = 0
-        while (time.time() - start) < 8:
-            if time.time() - start > 3.7 and retry_count == 0:
-                retry_count += 1
-                Logger.debug("Move to another position and try to open tp again")
-                pos_m = convert_abs_to_monitor((random.randint(-70, 70), random.randint(-70, 70)))
-                self.pre_move()
-                self.move(pos_m)
-                if skills.has_tps():
-                    mouse.click(button="right")
-                    consumables.increment_need("tp", 1)
-                wait(0.8, 1.3) # takes quite a while for tp to be visible
-            if (template_match := detect_screen_object(ScreenObjects.TownPortal)).valid:
-                pos = template_match.center_monitor
-                pos = (pos[0], pos[1] + 30)
-                # Note: Template is top of portal, thus move the y-position a bit to the bottom
-                mouse.move(*pos, randomize=6, delay_factor=[0.9, 1.1])
-                wait(0.08, 0.15)
-                mouse.click(button="left")
-                if wait_until_visible(ScreenObjects.Loading, 2).valid:
-                    return True
-            # move mouse away to not overlay with the town portal if mouse is in center
-            pos_screen = convert_monitor_to_screen(mouse.get_position())
-            if is_in_roi(roi_mouse_move, pos_screen):
-                mouse.move(*pos_away, randomize=40, delay_factor=[0.8, 1.4])
+        max_retries = 10
+        for attempt in range(max_retries):
+            # Check for the portal we already cast
+            portal_found = False
+            check_start = time.time()
+            while (time.time() - check_start) < 3.5:
+                if (template_match := detect_screen_object(ScreenObjects.TownPortal)).valid:
+                    portal_found = True
+                    pos = template_match.center_monitor
+                    pos = (pos[0], pos[1] + 30)
+                    mouse.move(*pos, randomize=6, delay_factor=[0.9, 1.1])
+                    wait(0.08, 0.15)
+                    mouse.click(button="left")
+                    if wait_until_visible(ScreenObjects.Loading, 2).valid:
+                        return True
+                # move mouse away to not overlay with the town portal
+                pos_screen = convert_monitor_to_screen(mouse.get_position())
+                if is_in_roi(roi_mouse_move, pos_screen):
+                    mouse.move(*pos_away, randomize=40, delay_factor=[0.8, 1.4])
+            # Portal not found or couldn't click it — move and recast
+            Logger.debug(f"TP attempt {attempt + 1}/{max_retries} failed, moving and recasting")
+            pos_m = convert_abs_to_monitor((random.randint(-70, 70), random.randint(-70, 70)))
+            self.pre_move()
+            self.move(pos_m)
+            if not skills.has_tps():
+                Logger.warning("No more TPs available")
+                return False
+            mouse.click(button="right")
+            consumables.increment_need("tp", 1)
+            wait(0.8, 1.3)
         return False
 
     def _pre_buff_cta(self):

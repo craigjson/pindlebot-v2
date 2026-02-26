@@ -81,18 +81,27 @@ class PickIt:
                 consumables.increment_need(consumable_type, -1)
         return (not need_exists)
 
+    # TODO: Re-enable yoink (teleport to item) once we can reliably click items after teleporting.
+    # Original yoink teleported to the item then clicked near center, but it missed frequently.
+    # @staticmethod
+    # def _yoink_item(item: GroundItem, char: IChar, force_tp=False) -> PickedUpResult:
+    #     if item.Distance > Config().ui_pos["item_dist"] or force_tp:
+    #         char.pre_move()
+    #         char.move((item.CenterMonitor['x'], item.CenterMonitor['y']), force_move=force_tp)
+    #         wait(0.2, 0.3)
+    #         keyboard.send(Config().char["show_items"])
+    #         wait(0.1, 0.15)
+    #         pos_m = convert_abs_to_monitor((0, -45))
+    #         mouse.move(*pos_m)
+    #         mouse.click(button="left")
+    #         wait(0.15, 0.2)
+    #     else:
+    #         char.pick_up_item((item.CenterMonitor['x'], item.CenterMonitor['y']), item_name=item.Name, prev_cast_start=0.1)
+    #     return PickedUpResult.PickedUp
+
     @staticmethod
-    def _yoink_item(item: GroundItem, char: IChar, force_tp=False) -> PickedUpResult:
-        if item.Distance > Config().ui_pos["item_dist"] or force_tp:
-            char.pre_move()
-            char.move((item.CenterMonitor['x'], item.CenterMonitor['y']), force_move=force_tp)
-            wait(0.09, 0.12)
-            # * Move mouse to the middle of the screen and click on the item you teleported to
-            pos_m = convert_abs_to_monitor((0,-45))
-            mouse.move(*pos_m)
-            mouse.click(button="left")
-        else:
-            char.pick_up_item((item.CenterMonitor['x'], item.CenterMonitor['y']), item_name=item.Name, prev_cast_start=0.1)
+    def _yoink_item(item: GroundItem, char: IChar) -> PickedUpResult:
+        char.pick_up_item((item.CenterMonitor['x'], item.CenterMonitor['y']), item_name=item.Name, prev_cast_start=0.1)
         return PickedUpResult.PickedUp
 
     def _pick_up_item(self, char: IChar, item: GroundItem) -> PickedUpResult:
@@ -103,18 +112,14 @@ class PickIt:
             if is_visible(ScreenObjects.Overburdened):
                 personal.set_inventory_gold_full(True)
                 return PickedUpResult.GoldFull
-            pickup_failed = self._fail_pickup_count >= 1
+            pickup_failed = self._fail_pickup_count >= 3
         # other items don't move, so should have same location
         if (item.UID == self._prev_item_pickup_attempt.UID):
             self._fail_pickup_count += 1
             wait(0.25, 0.35)
             if is_visible(ScreenObjects.Overburdened):
                 return PickedUpResult.InventoryFull
-            elif self._fail_pickup_count >= 1:
-                # * +1 because we failed at picking it up once already, we just can't detect the first failure (unless it is due to full inventory)
-                if char.capabilities.can_teleport_natively or char.capabilities.can_teleport_with_charges:
-                    Logger.warning(f"Failed to pick up '{item.Name}' {self._fail_pickup_count + 1} times in a row, trying to teleport")
-                    return self._yoink_item(item, char, force_tp=True)
+            elif self._fail_pickup_count >= 3:
                 pickup_failed = True
 
         if pickup_failed:

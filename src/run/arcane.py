@@ -97,14 +97,16 @@ class Arcane:
             elif i < len(path_arr) - 1:
                 # Open TP and return back to town, walk to wp and start over
                 if not self._char.tp_town():
-                    Logger.warning("TP to town failed, cancel run")
-                    return False
+                    Logger.warning("TP to town failed, trying next arm anyway")
+                    continue
                 set_pause_state(True)
                 if not self._town_manager.wait_for_tp(Location.A2_TP):
-                    return False
+                    continue
                 if not self.approach(Location.A2_FARA_STASH):
-                    return False
-        return False
+                    continue
+        # Didn't find summoner, but still treat as success so bot continues to next run
+        Logger.info("Arcane run complete (summoner not found)")
+        return (Location.A2_ARC_END, picked_up_items)
 
 
 if __name__ == "__main__":

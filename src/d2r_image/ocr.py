@@ -19,6 +19,12 @@ try:
     _has_pytesseract = True
 except ImportError:
     _has_pytesseract = False
+try:
+    import easyocr
+    _has_easyocr = True
+except ImportError:
+    _has_easyocr = False
+import re
 import numpy as np
 import cv2
 from utils.misc import erode_to_black, find_best_match
@@ -26,6 +32,22 @@ from d2r_image.data_models import OcrResult
 from d2r_image.ocr_data import ERROR_RESOLUTION_MAP, I_1, II_U, ONE_I, ONEONE_U
 from d2r_image.strings_store import all_words
 from logger import Logger
+
+# EasyOCR reader singleton — loaded once on first use
+_easyocr_reader = None
+def _get_easyocr_reader():
+    global _easyocr_reader
+    if _easyocr_reader is None:
+        gpu = True
+        try:
+            import torch
+            gpu = torch.cuda.is_available()
+        except ImportError:
+            gpu = False
+        Logger.info(f"Initializing EasyOCR (GPU={gpu})...")
+        _easyocr_reader = easyocr.Reader(['en'], gpu=gpu)
+        Logger.info("EasyOCR ready")
+    return _easyocr_reader
 
 def image_to_text(
     images: np.ndarray | list[np.ndarray],
@@ -65,9 +87,15 @@ def image_to_text(
         images = [images]
     results = []
 
-    if not _has_tesserocr and not _has_pytesseract:
-        Logger.warning("No OCR backend available (install tesserocr or pytesseract)")
+    if not _has_easyocr and not _has_tesserocr and not _has_pytesseract:
+        Logger.warning("No OCR backend available (install easyocr, tesserocr, or pytesseract)")
         return [OcrResult(original_text="", text="", word_confidences=[], mean_confidence=0) for _ in images]
+
+    # Use EasyOCR (GPU-accelerated) for single-line text (ground items) where speed matters,
+    # but fall back to Tesseract for multi-line tooltips where accuracy matters more.
+    if _has_easyocr and psm in (7, 8, 13):
+        return _image_to_text_easyocr(images, psm, scale, crop_pad, erode, invert, threshold,
+                                       digits_only, fix_regexps, check_known_errors, correct_words)
 
     if not _has_tesserocr and _has_pytesseract:
         return _image_to_text_pytesseract(images, model, psm, scale, crop_pad, erode, invert, threshold,
@@ -124,6 +152,81 @@ def image_to_text(
                 mean_confidence=api.MeanTextConf()
             ))
         return results
+
+
+def _image_to_text_easyocr(images, psm, scale, crop_pad, erode, invert, threshold,
+                            digits_only, fix_regexps, check_known_errors, correct_words):
+    """GPU-accelerated OCR using EasyOCR (PyTorch + CUDA)."""
+    reader = _get_easyocr_reader()
+    allowlist = '0123456789' if digits_only else None
+    results = []
+    for image in images:
+        processed_img = image
+        if scale:
+            processed_img = cv2.resize(processed_img, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+        if erode:
+            processed_img = erode_to_black(processed_img)
+        if crop_pad:
+            processed_img = _crop_pad(processed_img)
+        image_is_binary = (image.shape[2] if len(image.shape) == 3 else 1) == 1 and image.dtype == bool
+        if not image_is_binary and threshold:
+            processed_img = cv2.cvtColor(processed_img, cv2.COLOR_BGR2GRAY)
+            processed_img = cv2.threshold(processed_img, threshold, 255, cv2.THRESH_BINARY)[1]
+        if invert:
+            if threshold or image_is_binary:
+                processed_img = cv2.bitwise_not(processed_img)
+            else:
+                processed_img = ~processed_img
+        # EasyOCR expects BGR or grayscale numpy array
+        detections = reader.readtext(processed_img, allowlist=allowlist, detail=1, paragraph=False)
+        if detections:
+            confidences = [det[2] for det in detections]
+            word_confidences = [int(c * 100) for c in confidences]
+            if psm in (7, 8, 13):
+                # Single line — join all fragments with spaces, uppercase for ground items
+                original_text = ' '.join(det[1] for det in detections).upper()
+            else:
+                # Multi-line (psm=6, 3, etc.) — reconstruct line breaks from y-coordinates
+                # Sort detections top-to-bottom by the top-left y coordinate
+                sorted_dets = sorted(detections, key=lambda d: d[0][0][1])
+                lines = []
+                current_line = []  # store full detection objects for x-sorting
+                current_y = sorted_dets[0][0][0][1] if sorted_dets else 0
+                line_height = max(abs(sorted_dets[0][0][3][1] - sorted_dets[0][0][0][1]), 10) if sorted_dets else 20
+                for det in sorted_dets:
+                    det_y = det[0][0][1]
+                    # New line if y-coordinate jumps by more than half the line height
+                    if abs(det_y - current_y) > line_height * 0.5 and current_line:
+                        # Sort words left-to-right by x-coordinate within the line
+                        current_line.sort(key=lambda d: d[0][0][0])
+                        lines.append(' '.join(d[1] for d in current_line))
+                        current_line = []
+                        current_y = det_y
+                    current_line.append(det)
+                if current_line:
+                    current_line.sort(key=lambda d: d[0][0][0])
+                    lines.append(' '.join(d[1] for d in current_line))
+                original_text = '\n'.join(lines)
+            # Fix EasyOCR splitting colons into separate detections ("Quantity :" → "Quantity:")
+            original_text = re.sub(r'\s+:', ':', original_text)
+        else:
+            original_text = ""
+            word_confidences = []
+        text = original_text
+        if fix_regexps:
+            text = _fix_regexps(text)
+        if check_known_errors:
+            text = _check_known_errors(text)
+        if correct_words:
+            text = _ocr_result_dictionary_check(text, word_confidences)
+        mean_conf = sum(word_confidences) / max(len(word_confidences), 1) if word_confidences else 0
+        results.append(OcrResult(
+            original_text=original_text,
+            text=text,
+            word_confidences=word_confidences,
+            mean_confidence=mean_conf
+        ))
+    return results
 
 
 def _crop_pad(image: np.ndarray = None):
@@ -255,12 +358,23 @@ def _check_known_errors(text):
 def _contains_characters(word):
     return any(c.isalpha() for c in word)
 
+_cached_word_list = None
+
+def _get_word_list():
+    global _cached_word_list
+    if _cached_word_list is None:
+        _cached_word_list = list(all_words())
+    return _cached_word_list
+
 def _ocr_result_dictionary_check(
     original_text: str,
     confidences: list,
-    word_list: set = all_words(),
+    word_list: set = None,
     normalized_lev_threshold: float = 0.6
     ) -> str:
+    if word_list is None:
+        word_list = all_words()
+    word_list_for_fuzzy = _get_word_list()
     confidences = [x/100 for x in confidences]
     words_by_lines = [line.strip().split() for line in original_text.splitlines()]
     total_word_count = -1
@@ -283,17 +397,21 @@ def _ocr_result_dictionary_check(
             if word.startswith("'") and word.endswith("'") and len(word) > 1:
                 new_line.append(word)
                 continue
+            # skip fuzzy matching for high-confidence words
+            conf = confidences[total_word_count] if total_word_count < len(confidences) else 0
+            if conf >= 0.90:
+                new_line.append(word)
+                continue
             # fuzzy match the word
             # if the word has already been calculated on a lookahead check, used stored result
             if saved_result:
                 result = saved_result
                 saved_result = ""
             else:
-                result = find_best_match(word, list(word_list))
+                result = find_best_match(word, word_list_for_fuzzy)
             # if the word is the last word on the line don't lookahead
             if word_cnt == (len(line) - 1):
                 if result.score_normalized >= normalized_lev_threshold:
-                    # Logger.debug(f"_ocr_result_dictionary_check: change {word} -> {result.match} similarity: {result.score_normalized*100:.1f}%, OCR confidence: {int(confidences[total_word_count]*100)}%")
                     new_line.append(result.match)
                 else:
                     new_line.append(word)
@@ -303,22 +421,19 @@ def _ocr_result_dictionary_check(
             # if next word is in wordlist or doesn't contain characters, save current word
             if next_word in word_list or not _contains_characters(word):
                 if result.score_normalized >= normalized_lev_threshold:
-                    # Logger.debug(f"_ocr_result_dictionary_check: change {word} -> {result.match} similarity: {result.score_normalized*100:.1f}%, OCR confidence: {int(confidences[total_word_count]*100)}%")
                     new_line.append(result.match)
                 else:
                     new_line.append(word)
                 continue
             # fuzzy match the next word and a combination of both current and next words
-            next_result = find_best_match(next_word, list(word_list))
-            combined_result = find_best_match(f"{word} {next_word}", list(word_list))
+            next_result = find_best_match(next_word, word_list_for_fuzzy)
+            combined_result = find_best_match(f"{word} {next_word}", word_list_for_fuzzy)
             if combined_result.score < (result.score + next_result.score):
                 # combined lev score is superior to sum of individual lev scores, replace with combined string
                 skip_next = True
-                # Logger.debug(f'_ocr_result_dictionary_check: change "{word} {next_word}" -> {combined_result.match} similarity: {combined_result.score_normalized*100:.1f}%, OCR confidence: {int(confidences[total_word_count]*100)}%, {int(confidences[total_word_count+1]*100)}%')
                 new_line.append(combined_result.match)
             else:
                 if result.score_normalized >= normalized_lev_threshold:
-                    # Logger.debug(f"_ocr_result_dictionary_check: change {word} -> {result.match} similarity: {result.score_normalized*100:.1f}%, OCR confidence: {int(confidences[total_word_count]*100)}%")
                     new_line.append(result.match)
                 else:
                     new_line.append(word)

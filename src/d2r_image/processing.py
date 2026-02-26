@@ -30,20 +30,31 @@ def get_hovered_item(image: np.ndarray, model = "hover-eng_inconsolata_inv_th_fa
     res, quality = crop_item_tooltip(image, model)
     parsed_item = None
     if res.ocr_result:
+        Logger.debug(f"get_hovered_item OCR text:\n{res.ocr_result.text}")
         try:
             parsed_item = parse_item(quality, res.ocr_result.text)
         except Exception as e:
-            Logger.warning(f"\nparsed_item ERROR {e}\n {traceback.format_exc()}")
+            Logger.warning(f"parsed_item ERROR: {e}")
+            Logger.debug(f"OCR text was:\n{res.ocr_result.text}")
+            Logger.debug(f"Detected quality: {quality}")
             # * Log the screenshot to log/screenshots/info directory.
             t = time.time()
             cv2.imwrite(f"log/screenshots/info/02_{t}.png", res.img)
             with open("log/screenshots/info/02_error_log.txt", "a") as f:
                 f.write(f"""--------------------------------------------------------------------------------
 [{t}]
+quality: {quality}
 {res.ocr_result.text}
 
 {traceback.format_exc()}
 --------------------------------------------------------------------------------""")
+    else:
+        Logger.debug(f"get_hovered_item: no OCR result (tooltip not detected or empty)")
+        t = time.time()
+        if res.img is not None:
+            cv2.imwrite(f"log/screenshots/info/03_no_ocr_{t}.png", res.img)
+        # Save the full screenshot so we can see what the screen looked like
+        cv2.imwrite(f"log/screenshots/info/03_full_screen_{t}.png", image)
     return parsed_item, res
 
 

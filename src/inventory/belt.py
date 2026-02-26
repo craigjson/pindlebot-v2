@@ -142,17 +142,52 @@ def update_pot_needs():
     consumables.set_needs("rejuv", pot_needs["rejuv"])
     close(img)
 
+_REJUV_TEMPLATES = ["FULL_REJUV_POTION", "REJUV_POTION"]
+_ALL_POT_TEMPLATES = ["GREATER_HEALING_POTION", "GREATER_MANA_POTION", "SUPER_HEALING_POTION", "SUPER_MANA_POTION", "FULL_REJUV_POTION", "REJUV_POTION"]
+_REJUV_STOCKPILE_CAP = 4
+
+def refill_belt_and_update_rejuv_stockpile(img: np.ndarray = None):
+    """Shift-click inventory potions into belt, then update rejuv stockpile need.
+    Call while inventory is already open — does NOT open/close inventory."""
+    num_loot_columns = Config().char["num_loot_columns"]
+    if img is None:
+        img = grab()
+    pot_positions = []
+    for column, row in itertools.product(range(num_loot_columns), range(4)):
+        center_pos, slot_img = common.get_slot_pos_and_img(img, column, row)
+        if template_finder.search(_ALL_POT_TEMPLATES, slot_img, threshold=0.9).valid:
+            pot_positions.append(center_pos)
+    if pot_positions:
+        keyboard.press("shift")
+        for pos in pot_positions:
+            x, y = convert_screen_to_monitor(pos)
+            mouse.move(x, y, randomize=9, delay_factor=[1.0, 1.5])
+            wait(0.2, 0.3)
+            mouse.click(button="left")
+            wait(0.3, 0.4)
+        keyboard.release("shift")
+    # Count remaining rejuvs in inventory (ones that didn't fit in belt)
+    img = grab()
+    inv_rejuvs = 0
+    for column, row in itertools.product(range(num_loot_columns), range(4)):
+        _, slot_img = common.get_slot_pos_and_img(img, column, row)
+        if template_finder.search(_REJUV_TEMPLATES, slot_img, threshold=0.9).valid:
+            inv_rejuvs += 1
+    stockpile_need = max(0, _REJUV_STOCKPILE_CAP - inv_rejuvs)
+    current_rejuv_need = consumables.get_needs("rejuv")
+    consumables.set_needs("rejuv", current_rejuv_need + stockpile_need)
+    Logger.debug(f"Rejuv stockpile: {inv_rejuvs}/{_REJUV_STOCKPILE_CAP} in inventory, picking up {stockpile_need} more")
+
 def fill_up_belt_from_inventory(num_loot_columns: int):
     """
-    Fill up your belt with pots from the inventory e.g. after death. It will open and close invetory by itself!
+    Fill up your belt with pots from the inventory e.g. after death. It will open and close inventory by itself!
     :param num_loot_columns: Number of columns used for loot from left
     """
     img = personal.open()
     pot_positions = []
     for column, row in itertools.product(range(num_loot_columns), range(4)):
         center_pos, slot_img = common.get_slot_pos_and_img(img, column, row)
-        found = template_finder.search(["GREATER_HEALING_POTION", "GREATER_MANA_POTION", "SUPER_HEALING_POTION", "SUPER_MANA_POTION", "FULL_REJUV_POTION", "REJUV_POTION"], slot_img, threshold=0.9).valid
-        if found:
+        if template_finder.search(_ALL_POT_TEMPLATES, slot_img, threshold=0.9).valid:
             pot_positions.append(center_pos)
     keyboard.press("shift")
     for pos in pot_positions:

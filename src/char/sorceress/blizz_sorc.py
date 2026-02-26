@@ -58,9 +58,12 @@ class BlizzSorc(Sorceress):
     def kill_pindle(self) -> bool:
         pindle_pos_abs = convert_screen_to_abs(Config().path["pindle_end"][0])
         cast_pos_abs = [pindle_pos_abs[0] * 0.9, pindle_pos_abs[1] * 0.9]
-        for _ in range(int(Config().char["atk_len_pindle"])):
+        for i in range(int(Config().char["atk_len_pindle"])):
             self._blizzard(cast_pos_abs, spray=11)
             self._ice_blast(cast_pos_abs, spray=11)
+            # Ensure blizzard cooldown (1.8s) has elapsed before next loop
+            if i < int(Config().char["atk_len_pindle"]) - 1:
+                wait(0.4, 0.6)
         # Move to items
         wait(self._cast_duration, self._cast_duration + 0.2)
         self._pather.traverse_nodes_fixed("pindle_end", self)

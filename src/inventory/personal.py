@@ -28,6 +28,16 @@ messenger = Messenger()
 
 nontradable_items = ["key of ", "essense of", "wirt's", "jade figurine"]
 
+def _is_auto_stash_item(item_properties) -> bool:
+    """Check if item is a gem that auto-sorts via Ctrl+click (template-matched)."""
+    if item_properties is None:
+        return False
+    name = item_properties.Name.upper() if hasattr(item_properties, 'Name') and item_properties.Name else ""
+    gem_keywords = ['RUBY', 'SAPPHIRE', 'TOPAZ', 'EMERALD', 'DIAMOND', 'AMETHYST', 'SKULL']
+    if any(kw in name for kw in gem_keywords):
+        return True
+    return False
+
 @dataclass
 class BoxInfo:
     img: np.ndarray = None
@@ -37,10 +47,41 @@ class BoxInfo:
     need_id: bool = False
     sell: bool = False
     keep: bool = False
+    auto_stash: bool = False  # gems, runes, materials — Ctrl+click to auto-sort
     def __getitem__(self, key):
         return super().__getattribute__(key)
     def __setitem__(self, key, value):
         setattr(self, key, value)
+
+_GEM_TEMPLATES = [
+    f"INVENTORY_{gem}_{quality}"
+    for gem in ["AMETHYST", "DIAMOND", "EMERALD", "RUBY", "SAPPHIRE", "SKULL", "TOPAZ"]
+    for quality in ["CHIPPED", "FLAWED", "STANDARD", "FLAWLESS", "PERFECT"]
+]
+
+def _auto_stash_gems_by_template():
+    """Scan inventory for gems using template matching and Ctrl+click to auto-stash them."""
+    img = grab(True)
+    roi = Config().ui_roi["open_inventory_area"]
+    matches = template_finder.search_all(_GEM_TEMPLATES, img, threshold=0.9, roi=roi)
+    if not matches:
+        return
+    Logger.info(f"Auto-stashing {len(matches)} gems by template match")
+    keyboard.send('ctrl', do_release=False)
+    wait(0.1, 0.2)
+    for match in matches:
+        mouse.move(*match.center_monitor, randomize=4, delay_factor=[0.2, 0.4])
+        wait(0.2, 0.4)
+        pre_img = grab(True)
+        mouse.press(button="left")
+        success = wait_for_update(pre_img, roi, 3)
+        mouse.release(button="left")
+        if success:
+            Logger.debug(f"Auto-stashed {match.name}")
+        else:
+            Logger.warning(f"Auto-stash failed for {match.name} at {match.center_monitor}")
+    keyboard.send('ctrl', do_press=False)
+    wait(0.2, 0.3)
 
 def get_inventory_gold_full():
     return inv_gold_full
@@ -120,6 +161,14 @@ def stash_all_items(items: list = None):
             else:
                 set_inventory_gold_full(False)
     if not items:
+        items = []
+    # Auto-stash gems via template matching — much more reliable than OCR-based detection.
+    # Ctrl+click auto-sorts gems to the correct stash tab in D2R.
+    _auto_stash_gems_by_template()
+    # Remove gem items from the list (already handled by template matching above)
+    items = [item for item in items if not item.auto_stash]
+    if not items:
+        Logger.debug("Done stashing (all items were auto-stashed)")
         return []
     # check if stash tab is completely full (no empty slots)
     common.select_tab(stash.get_curr_stash()["items"])
@@ -222,7 +271,7 @@ def inspect_items(inp_img: np.ndarray = None, close_window: bool = True, game_st
         x_m, y_m = convert_screen_to_monitor(slot[0])
         delay = [0.2, 0.3] if count else [1, 1.3]
         mouse.move(x_m, y_m, randomize = 10, delay_factor = delay)
-        wait(0.1, 0.2)
+        wait(0.5, 0.7)
         hovered_item = grab(True)
         # get the item description box
         item_properties, item_box = (None, None)
@@ -284,7 +333,11 @@ def inspect_items(inp_img: np.ndarray = None, close_window: bool = True, game_st
 
                 tome_state = None
                 try:
-                    if (is_unidentified and should_id(item_properties.as_dict())):
+                    # Try to ID unidentified items — even if we couldn't parse properties
+                    should_try_id = is_unidentified and (
+                        item_properties is None or should_id(item_properties.as_dict())
+                    )
+                    if should_try_id:
                         box.need_id = True
                         center_mouse()
                         tome_state, tome_pos = common.tome_state(grab(True), tome_type = "id", roi = Config().ui_roi["restricted_inventory_area"])
@@ -292,20 +345,32 @@ def inspect_items(inp_img: np.ndarray = None, close_window: bool = True, game_st
                         common.id_item_with_tome([x_m, y_m], tome_pos)
                         box.need_id = False
                         is_unidentified = True
-                        # recapture box after ID
-                        mouse.move(x_m, y_m, randomize = 4, delay_factor = delay)
-                        wait(0.05, 0.1)
-                        hovered_item = grab(True)
-                        item_properties, item_box = d2r_image.get_hovered_item(hovered_item)
+                        # recapture box after ID — retry if properties fail to parse
+                        for _retry in range(3):
+                            center_mouse(delay_factor=[0.05, 0.1])
+                            wait(0.1, 0.15)
+                            mouse.move(x_m, y_m, randomize = 4, delay_factor = delay)
+                            wait(0.3, 0.5)
+                            hovered_item = grab(True)
+                            item_properties, item_box = d2r_image.get_hovered_item(hovered_item)
+                            if item_properties is not None:
+                                break
+                            Logger.debug(f"Post-ID read attempt {_retry + 1} failed for {item_name}, retrying...")
 
-                    if item_box is not None:
+                    if item_box is not None and item_properties is not None:
                         log_item(item_box, item_properties)
                         # decide whether to keep item
                         box.keep, expression = should_keep(item_properties.as_dict())
 
-                        # make sure it's not a consumable
-                        # TODO: logic for trying to add potion to belt if there are needs
-                        box.keep &= not bool(consumables.is_consumable(item_properties))
+                        # tag gems/runes/materials for auto-stash (Ctrl+click to auto-sort)
+                        if box.keep and _is_auto_stash_item(item_properties):
+                            box.auto_stash = True
+                            Logger.info(f"Auto-stash {item_name} (gem/rune/material)")
+
+                        # make sure it's not a consumable (but keep rejuvs as belt stockpile)
+                        consumable_type = consumables.is_consumable(item_properties)
+                        if consumable_type and "rejuv" not in consumable_type:
+                            box.keep = False
 
                         if box.keep:
                             Logger.info(f"Keep {item_name}. Expression: {expression}")
@@ -313,7 +378,6 @@ def inspect_items(inp_img: np.ndarray = None, close_window: bool = True, game_st
                         elif box.need_id:
                             Logger.debug(f"Need to ID {item_name}.")
                         else:
-                            #Logger.debug(f"Discarding {json.dumps(item_properties.as_dict(), indent = 4)}")
                             Logger.debug(f"Discarding {item_name}.")
 
                         # sell if not keeping item, vendor is open, and item type can be traded
@@ -335,12 +399,26 @@ def inspect_items(inp_img: np.ndarray = None, close_window: bool = True, game_st
                             transfer_items([box], action = "drop")
                         wait(0.05, 0.2)
                     else:
-                        failed = True
+                        # Could not fully parse item. Check if tooltip text indicates a rune — auto-stash instead of dropping.
+                        ocr_text = item_box.ocr_result.text.upper() if item_box and item_box.ocr_result else ""
+                        if "RUNE" in ocr_text:
+                            Logger.info(f"Could not parse {item_name} but detected rune in tooltip — keeping for stash")
+                            box.keep = True
+                            boxes.append(box)
+                        else:
+                            Logger.warning(f"Could not parse {item_name} after all attempts. Dropping to free inventory space.")
+                            transfer_items([box], action = "drop")
+                            failed = True
                 except AttributeError as e:
                     failed = True
-                    # * Drop item.
-                    Logger.info(f"Dropping {item_name}. Failed with AttributeError {e}")
-                    transfer_items([box], action = "drop")
+                    ocr_text = item_box.ocr_result.text.upper() if item_box and item_box.ocr_result else ""
+                    if "RUNE" in ocr_text:
+                        Logger.info(f"Could not read {item_name} (AttributeError: {e}) but detected rune — keeping for stash")
+                        box.keep = True
+                        boxes.append(box)
+                    else:
+                        Logger.warning(f"Could not read {item_name} (AttributeError: {e}). Dropping to free inventory space.")
+                        transfer_items([box], action = "drop")
 
 
         if failed:
@@ -453,6 +531,7 @@ def update_tome_key_needs(img: np.ndarray = None, item_type: str = "tp") -> bool
     item_properties, item_box = d2r_image.get_hovered_item(hovered_item)
     if item_box is not None:
         try:
+            Logger.debug(f"update_tome_key_needs: item_properties.NTIPAliasStat = {item_properties.NTIPAliasStat}")
             quantity = int(item_properties.NTIPAliasStat[NTIP_STATS["quantity"]])
             max_quantity = int(item_properties.NTIPAliasStat[NTIP_STATS["quantitymax"]])
             consumables.set_needs(item_type, max_quantity - quantity)

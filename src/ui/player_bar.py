@@ -31,7 +31,11 @@ def get_experience():
         correct_words = False
     )[0]
 
-    split_text = ocr_result.text.split(' ')
+    # Normalize OCR variations: EasyOCR may read ":" as "=" or split differently
+    normalized = ocr_result.text.replace('=', ':').replace(' :', ':').replace(': ', ':')
+    # Ensure "EXPERIENCE:" is one token
+    normalized = normalized.replace('EXPERIENCE:', 'EXPERIENCE: ')
+    split_text = normalized.split()
 
     try:
         split_text = split_text[split_text.index("EXPERIENCE:"):]

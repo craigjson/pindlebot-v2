@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from parse import compile as compile_pattern
 from d2r_image.data_models import ItemQuality
@@ -102,10 +103,16 @@ def load_lookup():
             runes_by_name[misc_item.upper().replace(' ', '')] = item_lookup_by_display_name['misc'][misc_item]
     pass
 
+def _uppercase_pattern(pattern: str) -> str:
+    """Uppercase the literal text in a parse pattern, preserving format specifiers like {:d}."""
+    parts = re.split(r'(\{[^}]*\})', pattern)
+    return ''.join(part.upper() if not part.startswith('{') else part for part in parts)
+
 def load_parsers():
     for key, value in REF_PATTERNS.items():
         REF_PATTERNS[key] = {
             "compiled_pattern": compile_pattern(key),
+            "compiled_pattern_upper": compile_pattern(_uppercase_pattern(key)),
             "identifiers": value
         }
 
@@ -242,8 +249,10 @@ def get_by_name(name: str, _call_count=1):
 
 def find_pattern_match(text):
     match = None
+    text_upper = text.upper()
     for _, pattern in REF_PATTERNS.items():
-        result = pattern["compiled_pattern"].parse(text)
+        # Try original case first, then uppercase (handles EasyOCR all-caps output)
+        result = pattern["compiled_pattern"].parse(text) or pattern["compiled_pattern_upper"].parse(text_upper)
         if result:
             # If the captured data points is an array of one thing, flatten in.
             data_points = result.fixed
@@ -258,8 +267,9 @@ def find_pattern_match(text):
 
 def find_modifier_pattern_match(modifier_line):
     match = None
+    modifier_line_upper = modifier_line.upper()
     for _, pattern in REF_PATTERNS.items():
-        result = pattern["compiled_pattern"].parse(modifier_line)
+        result = pattern["compiled_pattern"].parse(modifier_line) or pattern["compiled_pattern_upper"].parse(modifier_line_upper)
         if result:
             data_points = result.fixed
             if type(data_points) == tuple and len(data_points) == 1:
