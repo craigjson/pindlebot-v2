@@ -6,6 +6,7 @@ from item.pickit import PickIt
 import template_finder
 from town.town_manager import TownManager
 from utils.misc import wait
+from utils.run_timer import RunTimer
 from dataclasses import dataclass
 from chest import Chest
 from ui import waypoint
@@ -35,11 +36,18 @@ class Arcane:
         set_pause_state(True)
         if not self._char.capabilities.can_teleport_natively:
             raise ValueError("Arcane requires teleport")
+        t = RunTimer.get()
+        t.start("open_wp")
         if not self._town_manager.open_wp(start_loc):
+            t.stop("open_wp")
             return False
+        t.stop("open_wp")
         wait(0.4)
+        t.start("use_wp")
         if waypoint.use_wp("Arcane Sanctuary"):
+            t.stop("use_wp")
             return Location.A2_ARC_START
+        t.stop("use_wp")
         return False
 
     def _find_summoner(self, traverse_to_summoner: list[tuple[float, float]]) -> bool:
@@ -63,6 +71,8 @@ class Arcane:
 
     def battle(self, do_pre_buff: bool) -> bool | tuple[Location, bool]:
         picked_up_items = False
+        t = RunTimer.get()
+
         @dataclass
         class PathData:
             calib_node_start: int
@@ -81,17 +91,28 @@ class Arcane:
         for i, data in enumerate(path_arr):
             set_pause_state(False)
             if do_pre_buff:
+                t.start("pre_buff")
                 self._char.pre_buff()
+                t.stop("pre_buff")
             # calibrating at start and moving towards the end of the arm
+            t.start("traverse_arm")
             self._pather.traverse_nodes([data.calib_node_start], self._char, force_tp=True)
             if not self._pather.traverse_nodes_fixed(data.static_path_forward, self._char):
+                t.stop("traverse_arm")
                 return False
+            t.stop("traverse_arm")
+            t.start("find_summoner")
             found = self._find_summoner(data.jump_to_summoner)
+            t.stop("find_summoner")
             # Kill the summoner or trash mob
+            t.start("combat")
             self._char.kill_summoner()
+            t.stop("combat")
             if Config().char["open_chests"]:
                 self._chest.open_up_chests()
+            t.start("looting")
             picked_up_items |= self._pickit.pick_up_items(self._char)
+            t.stop("looting")
             if found:
                 return (Location.A2_ARC_END, picked_up_items)
             elif i < len(path_arr) - 1:

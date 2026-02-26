@@ -46,7 +46,12 @@ class A2(IAct):
         return False
 
     def open_trade_menu(self, curr_loc: Location) -> Location | bool:
-        if not self._pather.traverse_nodes((curr_loc, Location.A2_DROGNAN), self._char, force_move=True): return False
+        if curr_loc != Location.A2_FARA_STASH:
+            if not self._pather.traverse_nodes((curr_loc, Location.A2_FARA_STASH), self._char, force_move=True):
+                return False
+            curr_loc = Location.A2_FARA_STASH
+        if not self._pather.traverse_nodes((curr_loc, Location.A2_DROGNAN), self._char, force_move=True):
+            return False
         if open_npc_menu(Npc.DROGNAN):
             press_npc_btn(Npc.DROGNAN, "trade")
             return Location.A2_DROGNAN

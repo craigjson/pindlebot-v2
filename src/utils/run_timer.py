@@ -1,6 +1,10 @@
+import json
+import os
 import time
 from collections import defaultdict
 from logger import Logger
+
+TIMING_LOG_PATH = "log/timing/timing.jsonl"
 
 
 class RunTimer:
@@ -49,9 +53,24 @@ class RunTimer:
             return
         total = time.time() - self._run_start
         self._current_run["_total"] = total
+        self._persist_run(total)
         self._flush_run()
         self._log_summary()
         self._run_start = None
+
+    def _persist_run(self, total: float):
+        """Append this run's phase timings to the persistent JSONL log."""
+        record = {
+            "ts": time.time(),
+            "phases": {k: round(v, 3) for k, v in self._current_run.items() if not k.startswith("_")},
+            "total": round(total, 3),
+        }
+        try:
+            os.makedirs(os.path.dirname(TIMING_LOG_PATH), exist_ok=True)
+            with open(TIMING_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+        except Exception as e:
+            Logger.warning(f"RunTimer: failed to persist timing data: {e}")
 
     def _flush_run(self):
         for phase, duration in self._current_run.items():

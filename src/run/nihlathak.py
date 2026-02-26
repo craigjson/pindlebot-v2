@@ -5,6 +5,7 @@ from item.pickit import PickIt
 import template_finder
 from town.town_manager import TownManager
 from utils.misc import wait
+from utils.run_timer import RunTimer
 from dataclasses import dataclass
 from screen import convert_abs_to_monitor
 import random
@@ -33,24 +34,38 @@ class Nihlathak:
         Logger.info("Run Nihlathak")
         if not self._char.capabilities.can_teleport_natively:
             raise ValueError("Nihlathak requires teleport")
+        t = RunTimer.get()
+        t.start("open_wp")
         if not self._town_manager.open_wp(start_loc):
+            t.stop("open_wp")
             return False
+        t.stop("open_wp")
         wait(0.4)
+        t.start("use_wp")
         if waypoint.use_wp("Halls of Pain"): # use Halls of Pain Waypoint (5th in A5)
+            t.stop("use_wp")
             return Location.A5_NIHLATHAK_START
+        t.stop("use_wp")
         return False
 
     def battle(self, do_pre_buff: bool) -> bool | tuple[Location, bool]:
+        t = RunTimer.get()
         # TODO: We might need a second template for each option as merc might run into the template and we dont find it then
         # Let's check which layout ("NI1_A = bottom exit" , "NI1_B = large room", "NI1_C = small room")
+        t.start("detect_ni1_layout")
         template_match = template_finder.search_and_wait(["NI1_A", "NI1_B", "NI1_C"], threshold=0.65, timeout=20)
         if not template_match.valid:
+            t.stop("detect_ni1_layout")
             return False
+        t.stop("detect_ni1_layout")
         if do_pre_buff:
+            t.start("pre_buff")
             self._char.pre_buff()
+            t.stop("pre_buff")
 
         # Depending on what template is found we do static pathing to the stairs on level1.
         # Its xpects that the static routes defined in game.ini are named: "ni1_a", "ni1_b", "ni1_c"
+        t.start("traverse_to_stairs")
         self._pather.traverse_nodes_fixed(template_match.name.lower(), self._char)
         found_loading_screen_func = lambda: loading.wait_for_loading_screen(2.0) or \
             template_finder.search_and_wait(["NI2_SEARCH_0", "NI2_SEARCH_1"], threshold=0.8, timeout=0.5).valid
@@ -60,11 +75,16 @@ class Nihlathak:
             pos_m = convert_abs_to_monitor((random.randint(-70, 70), random.randint(-70, 70)))
             self._char.move(pos_m, force_move=True)
             if not self._char.select_by_template(["NI1_STAIRS", "NI1_STAIRS_2", "NI1_STAIRS_3", "NI1_STAIRS_4"], found_loading_screen_func, threshold=0.63, timeout=4):
+                t.stop("traverse_to_stairs")
                 return False
+        t.stop("traverse_to_stairs")
         # Wait until templates in lvl 2 entrance are found
+        t.start("load_ni2")
         if not template_finder.search_and_wait(["NI2_SEARCH_0", "NI2_SEARCH_1", "NI2_SEARCH_2"], threshold=0.8, timeout=20).valid:
+            t.stop("load_ni2")
             return False
         wait(1.0) # wait to make sure the red writing is gone once we check for the eye
+        t.stop("load_ni2")
         @dataclass
         class EyeCheckData:
             template_name: list[str]
@@ -81,6 +101,7 @@ class Nihlathak:
         ]
 
         end_nodes = None
+        t.start("eye_search")
         for data in check_arr:
             # Move to spot where eye would be visible
             self._pather.traverse_nodes_fixed(data.circle_static_path_key, self._char)
@@ -99,10 +120,16 @@ class Nihlathak:
             self._pather.traverse_nodes_fixed(check_arr[0].destination_static_path_key, self._char)
             self._pather.traverse_nodes(check_arr[0].save_dist_nodes, self._char, timeout=2, do_pre_move=False)
             end_nodes = check_arr[0].end_nodes
+        t.stop("eye_search")
 
         # Attack & Pick items
+        t.start("combat")
         if not self._char.kill_nihlathak(end_nodes):
+            t.stop("combat")
             return False
+        t.stop("combat")
         wait(0.2, 0.3)
+        t.start("looting")
         picked_up_items = self._pickit.pick_up_items(self._char)
+        t.stop("looting")
         return (Location.A5_NIHLATHAK_END, picked_up_items)

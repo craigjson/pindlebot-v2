@@ -287,12 +287,15 @@ class Bot:
     def on_maintenance(self):
         # Pause health manager if not already paused
         set_pause_state(True)
+        t = RunTimer.get()
+        t.start_run()
 
         # Dismiss skill/quest/help/stats icon if they are on screen
         if not view.dismiss_skills_icon():
             view.return_to_play()
 
         # Look at belt to figure out how many pots need to be picked up
+        t.start("town_belt_and_inspect")
         belt.update_pot_needs()
 
         # Inspect inventory
@@ -320,16 +323,20 @@ class Bot:
                 Logger.debug("Inspecting inventory items")
                 items = personal.inspect_items(img, game_stats=self._game_stats, close_window=False)
         common.close()
+        t.stop("town_belt_and_inspect")
         Logger.debug(f"Needs: {consumables.get_needs()}")
         if items:
             # if there are still items that need identifying, go to cain to identify them
             if any([item.need_id for item in items]):
                 Logger.info("ID items at cain")
+                t.start("town_identify")
                 self._curr_loc = self._town_manager.identify(self._curr_loc)
                 if not self._curr_loc:
+                    t.stop("town_identify")
                     return self.trigger_or_stop("end_game", failed=True)
                 # recheck inventory
                 items = personal.inspect_items(game_stats=self._game_stats)
+                t.stop("town_identify")
         keep_items = any([item.keep for item in items]) if items else None
         sell_items = any([item.sell for item in items]) if items else None
         stash_gold = personal.get_inventory_gold_full()
@@ -345,25 +352,31 @@ class Bot:
         )
         if need_refill or sell_items:
             Logger.info("Buy consumables and/or sell items")
+            t.start("town_buy_or_heal")
             self._curr_loc, result_items = self._town_manager.buy_consumables(self._curr_loc, items = items)
             if self._curr_loc:
                 items = result_items
                 sell_items = any([item.sell for item in items]) if items else None
                 Logger.debug(f"Needs: {consumables.get_needs()}")
+            t.stop("town_buy_or_heal")
         elif meters.get_health(img) < 0.6 or meters.get_mana(img) < 0.2:
             Logger.info("Healing at next possible Vendor")
+            t.start("town_buy_or_heal")
             self._curr_loc = self._town_manager.heal(self._curr_loc)
+            t.stop("town_buy_or_heal")
         if not self._curr_loc:
             return self.trigger_or_stop("end_game", failed=True)
 
         # Stash stuff
         if keep_items or stash_gold:
             Logger.info("Stashing items")
+            t.start("town_stash")
             self._curr_loc, result_items = self._town_manager.stash(self._curr_loc, items=items)
             sell_items = any([item.sell for item in result_items]) if result_items else None
             Logger.info("Running transmutes")
             self._transmute.run_transmutes(force=False)
             common.close()
+            t.stop("town_stash")
             if not self._curr_loc:
                 return self.trigger_or_stop("end_game", failed=True)
             self._picked_up_items = False
@@ -381,9 +394,11 @@ class Bot:
                 Logger.info("Teleport charges ran out. Need to repair")
             elif sell_items:
                 Logger.info("Selling items at repair vendor")
+            t.start("town_repair")
             self._curr_loc, result_items = self._town_manager.repair(self._curr_loc, items)
             if self._curr_loc:
                 items = result_items
+            t.stop("town_repair")
             if not self._curr_loc:
                 return self.trigger_or_stop("end_game", failed=True)
 
@@ -391,18 +406,22 @@ class Bot:
         if not is_visible(ScreenObjects.MercIcon) and Config().char["use_merc"]:
             Logger.info("Resurrect merc")
             self._game_stats.log_merc_death()
+            t.start("town_resurrect")
             self._curr_loc = self._town_manager.resurrect(self._curr_loc)
+            t.stop("town_resurrect")
             if not self._curr_loc:
                 return self.trigger_or_stop("end_game", failed=True)
 
         # Gamble if needed
         while vendor.get_gamble_status() and Config().char["gamble_items"]:
             Logger.debug("Head to gamble")
+            t.start("town_gamble")
             self._curr_loc = self._town_manager.gamble(self._curr_loc)
             items = vendor.gamble()
             if items:
                 self._curr_loc, _ = self._town_manager.stash(self._curr_loc, items = items)
                 common.close()
+            t.stop("town_gamble")
             if not self._curr_loc:
                 return self.trigger_or_stop("end_game", failed=True)
 
@@ -498,7 +517,6 @@ class Bot:
         res = False
         self._do_runs["run_pindle"] = False
         self._game_stats.update_location("Pin")
-        RunTimer.get().start_run()
         self._curr_loc = self._pindle.approach(self._curr_loc)
         if self._curr_loc:
             set_pause_state(False)
