@@ -9,7 +9,11 @@ $ErrorActionPreference = "Stop"
 $RepoUrl = "https://github.com/craigjson/pindlebot-v2.git"
 $InstallDir = "C:\pindlebot-v2"
 
-# -- 1. Install Git -----------------------------------------------------------
+# -- 1. Install Visual C++ Redistributable (required by opencv, scipy, etc.) --
+Write-Host "Installing Visual C++ Redistributable..." -ForegroundColor Cyan
+winget install --id Microsoft.VCRedist.2015+.x64 -e --source winget --accept-package-agreements --accept-source-agreements
+
+# -- 2. Install Git -----------------------------------------------------------
 Write-Host "Installing Git..." -ForegroundColor Cyan
 winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
