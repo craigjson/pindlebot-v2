@@ -65,7 +65,12 @@ class A2(IAct):
         return False
 
     def open_wp(self, curr_loc: Location) -> bool:
-        if not self._pather.traverse_nodes((curr_loc, Location.A2_WP), self._char, force_move=True): return False
+        if curr_loc != Location.A2_FARA_STASH:
+            if not self._pather.traverse_nodes((curr_loc, Location.A2_FARA_STASH), self._char, force_move=True):
+                return False
+            curr_loc = Location.A2_FARA_STASH
+        if not self._pather.traverse_nodes((curr_loc, Location.A2_WP), self._char, force_move=True):
+            return False
         wait(0.5, 0.7)
         found_wp_func = lambda: is_visible(ScreenObjects.WaypointLabel)
         return self._char.select_by_template(["A2_WP_LIGHT", "A2_WP_DARK"], found_wp_func, telekinesis=True)
