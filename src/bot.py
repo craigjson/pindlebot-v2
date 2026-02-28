@@ -33,7 +33,7 @@ from char.bone_necro import Bone_Necro
 from char.basic import Basic
 from char.basic_ranged import Basic_Ranged
 from ui_manager import wait_until_hidden, wait_until_visible, ScreenObjects, is_visible, detect_screen_object
-from ui import meters, skills, view, character_select, main_menu
+from ui import meters, skills, view, character_select, main_menu, waypoint
 from inventory import personal, vendor, belt, common
 
 from run import Pindle, ShenkEld, Trav, Nihlathak, Arcane, Diablo
@@ -41,6 +41,14 @@ from town import TownManager, A1, A2, A3, A4, A5, town_manager
 
 from messages import Messenger
 from utils.run_timer import RunTimer
+
+_ACT_TOWN_WP = {
+    "1": "Rouge Encampment",
+    "2": "Lut Gholein",
+    "3": "Kurast Docks",
+    "4": "The Pandemonium Fortress",
+    "5": "Harrogath",
+}
 
 class Bot:
 
@@ -436,9 +444,34 @@ class Bot:
         if not started_run:
             self.trigger_or_stop("end_game")
 
+    def _navigate_to_end_act(self):
+        """Navigate to the configured act before saving, so the next game spawns there."""
+        target = Config().general.get("end_in_act", "").strip()
+        if not target or not self._curr_loc:
+            return
+        dest_wp = _ACT_TOWN_WP.get(target)
+        if not dest_wp:
+            Logger.warning(f"end_in_act={target!r} is not a valid act (1-5), skipping")
+            return
+        # If in a dungeon (e.g. Arcane Sanctuary), TP to town first
+        if str(self._curr_loc).startswith("a2_arc"):
+            Logger.info(f"end_in_act: TP to A2 town before WP to act {target}")
+            if not self._char.tp_town():
+                Logger.warning("end_in_act: tp_town() failed, skipping act navigation")
+                return
+            self._curr_loc = self._town_manager.wait_for_tp(self._curr_loc)
+            if not self._curr_loc:
+                Logger.warning("end_in_act: wait_for_tp() failed, skipping act navigation")
+                return
+        Logger.info(f"end_in_act: opening WP to navigate to act {target} ({dest_wp})")
+        if self._town_manager.open_wp(self._curr_loc):
+            waypoint.use_wp(dest_wp)
+
     def on_end_game(self, failed: bool = False):
         if Config().general["info_screenshots"] and failed:
             cv2.imwrite("./log/screenshots/info/info_failed_game_" + time.strftime("%Y%m%d_%H%M%S") + ".png", grab())
+        if not failed:
+            self._navigate_to_end_act()
         self._curr_loc = False
         self._pre_buffed = False
         view.save_and_exit()

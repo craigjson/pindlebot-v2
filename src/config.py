@@ -152,6 +152,7 @@ class Config:
             "d2r_path": _default_iff(self._select_val("general", "d2r_path"), "", "C:\Program Files (x86)\Diablo II Resurrected"),
             "restart_d2r_when_stuck": bool(int(self._select_val("general", "restart_d2r_when_stuck"))),
             "resolution": self._select_optional("general", "resolution", "720p"),
+            "end_in_act": self._select_optional("general", "end_in_act", "").strip(),
         }
 
         # Determine resolution scale factor
