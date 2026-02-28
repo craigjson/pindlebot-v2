@@ -9,7 +9,7 @@ import math
 from copy import copy
 from collections import OrderedDict
 
-from health_manager import set_pause_state
+from health_manager import set_pause_state, set_panel_check_paused
 from transmute import Transmute
 from utils.misc import wait, hms
 from utils.restart import safe_exit, restart_game
@@ -464,8 +464,12 @@ class Bot:
                 Logger.warning("end_in_act: wait_for_tp() failed, skipping act navigation")
                 return
         Logger.info(f"end_in_act: opening WP to navigate to act {target} ({dest_wp})")
-        if self._town_manager.open_wp(self._curr_loc):
-            waypoint.use_wp(dest_wp)
+        set_panel_check_paused(True)
+        try:
+            if self._town_manager.open_wp(self._curr_loc):
+                waypoint.use_wp(dest_wp)
+        finally:
+            set_panel_check_paused(False)
 
     def on_end_game(self, failed: bool = False):
         if Config().general["info_screenshots"] and failed:
